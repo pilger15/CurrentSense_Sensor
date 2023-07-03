@@ -58,11 +58,6 @@ spi_device_handle_t spi;
 uint8_t adc_data[2] = {0x00, 0x00}; // Data to be sent over SPI
 spi_transaction_t adc_trans;
 
-uint16_t buffer0[ADC_BUFFER_LEN];
-uint16_t buffer1[ADC_BUFFER_LEN];
-uint16_t *buffer_store = buffer0; // Pointer to the current buffer (buffer0 initially)
-uint16_t *buffer_send = buffer0;
-
 #define RINGBUFFER_READ_LEN_16 (ESP_NOW_MAX_DATA_LEN / 2)
 #define RINGBUFFER_SIZE (RINGBUFFER_READ_LEN_16 * 32)
 uint16_t adc_ringbuffer[RINGBUFFER_SIZE];
@@ -211,8 +206,6 @@ void app_main(void)
 {
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-    memset(buffer0, 0x55, ADC_BUFFER_LEN * sizeof(uint16_t));
-    memset(buffer1, 0x56, ADC_BUFFER_LEN * sizeof(uint16_t));
     // Initialize NVS
     esp_err_t ret;
     ret = nvs_flash_init();
