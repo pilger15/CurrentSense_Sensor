@@ -58,11 +58,13 @@ spi_device_handle_t spi;
 uint8_t adc_data[2] = {0x00, 0x00}; // Data to be sent over SPI
 spi_transaction_t adc_trans;
 
-#define RINGBUFFER_READ_LEN_16 (ESP_NOW_MAX_DATA_LEN / 2)
+#define RINGBUFFER_READ_LEN_16 (ESP_NOW_MAX_DATA_LEN / 2 - 1) // one uint16_t for packet counter
 #define RINGBUFFER_SIZE (RINGBUFFER_READ_LEN_16 * 32)
 uint16_t adc_ringbuffer[RINGBUFFER_SIZE];
 uint16_t buffer_write_idx = 0;
 uint16_t buffer_read_idx = 0;
+uint16_t espnow_buffer_tx[RINGBUFFER_READ_LEN_16 + 1];
+uint16_t packet_cnt = 0;
 
 bool measure = false;
 
@@ -166,12 +168,16 @@ void IRAM_ATTR espnow_send_task(void *pvParameters)
 
             // Send data over ESP-NOW
             // REG_WRITE(GPIO_OUT_W1TS_REG, BIT_BLUE_LED); // initialise conversion
-            esp_err_t ret = esp_now_send(peer->peer_addr, (uint8_t *)&adc_ringbuffer[buffer_read_idx], RINGBUFFER_READ_LEN_16 * sizeof(uint16_t));
+            memcpy(&espnow_buffer_tx[1], &adc_ringbuffer[buffer_read_idx], RINGBUFFER_READ_LEN_16 * sizeof(uint16_t));
+            espnow_buffer_tx[0] = (packet_cnt++); // will overflow to 0
+            esp_err_t ret = esp_now_send(peer->peer_addr, (uint8_t *)espnow_buffer_tx, sizeof(espnow_buffer_tx));
             buffer_read_idx = (buffer_read_idx + RINGBUFFER_READ_LEN_16) % RINGBUFFER_SIZE;
+            // ESP_LOGE("CNT", "CNT = %d", espnow_buffer_tx[0]);
             // REG_WRITE(GPIO_OUT_W1TC_REG, BIT_BLUE_LED); // initialise conversion
             if (ret != ESP_OK)
             {
                 ESP_LOGE("ESP-NOW", "Error sending data: %s", esp_err_to_name(ret));
+                REG_WRITE(GPIO_OUT_W1TC_REG, BIT_BLUE_LED); // Clear BLUE LED;
             }
         }
     }
@@ -179,6 +185,15 @@ void IRAM_ATTR espnow_send_task(void *pvParameters)
 
 static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
+    if (status == ESP_NOW_SEND_SUCCESS)
+    {
+        // Data sent successfully
+    }
+    else
+    {
+        ESP_LOGE("ESP-NOW", "Error sending data: %s", esp_err_to_name(status));
+        REG_WRITE(GPIO_OUT_W1TC_REG, BIT_BLUE_LED); // Clear BLUE LED;
+    }
 }
 static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_t *data, int data_len)
 {
@@ -189,12 +204,14 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
         ESP_LOGD("TIMER", "Measurement started");
 
         REG_WRITE(GPIO_OUT_W1TS_REG, BIT_ORANGE_LED); // High
+        packet_cnt = 0;
     }
     else
     {                                                 // stop
         REG_WRITE(GPIO_OUT_W1TC_REG, BIT_ORANGE_LED); // LOW
                                                       //  REG_WRITE(GPIO_OUT_W1TC_REG, BIT10); // LOW
         ESP_LOGD("TIMER", "Measurement stopped");
+        REG_WRITE(GPIO_OUT_W1TS_REG, BIT_BLUE_LED); // Set blue in case it was turned off as error indicator
     }
 
     measure = !measure;
@@ -254,7 +271,7 @@ void app_main(void)
     peer->channel = CONFIG_ESPNOW_CHANNEL;
     peer->ifidx = ESP_IF_WIFI_STA;
     peer->encrypt = false;
-    memcpy(peer->peer_addr, sensor_mac, ESP_NOW_ETH_ALEN);
+    peer.memcpy(peer->peer_addr, sensor_mac, ESP_NOW_ETH_ALEN);
     ESP_ERROR_CHECK(esp_now_add_peer(peer));
 
     spi_init();
