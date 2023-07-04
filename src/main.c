@@ -271,7 +271,7 @@ void app_main(void)
     peer->channel = CONFIG_ESPNOW_CHANNEL;
     peer->ifidx = ESP_IF_WIFI_STA;
     peer->encrypt = false;
-    peer.memcpy(peer->peer_addr, sensor_mac, ESP_NOW_ETH_ALEN);
+    memcpy(peer->peer_addr, sensor_mac, ESP_NOW_ETH_ALEN);
     ESP_ERROR_CHECK(esp_now_add_peer(peer));
 
     spi_init();
