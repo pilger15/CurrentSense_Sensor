@@ -80,7 +80,8 @@ const transfertype_t transfertype = TRANSFER_WIFI;
 typedef enum
 {
     espcommand_empty,
-    espcommand_measure
+    espcommand_start,
+    espcommand_stop
 } esp_command_t;
 
 // static const uint64_t espcommand_channel = 0x74797380ec3cce13ULL;
@@ -194,21 +195,25 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
         ESP_LOGD("ESP-NOW", "Received command %d- entering Switch", data[0]);
         switch ((esp_command_t)data[0])
         {
-        case espcommand_measure:
+        case espcommand_start:
             if (!measure) // start measure
             {
+                measure = true;
+                packet_cnt = 0;
+                buffer_read_idx = 0;
+                buffer_write_idx = 0;
                 ESP_LOGI("ESP-NOW", "Start measurement");
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, TIMERPERIOD_US)); // in us
                                                                                            // garbage transmit
                 ESP_LOGD("TIMER", "Measurement started");
 
                 REG_WRITE(GPIO_OUT_W1TS_REG, 1 << ORANGE_LED); // High
-                packet_cnt = 0;
-                buffer_read_idx = 0;
-                buffer_write_idx = 0;
             }
-            else
+            break;
+        case espcommand_stop:
+            if (measure)
             {
+                measure = false;
                 ESP_LOGI("ESP-NOW", "Stop measurement"); // stop
                 // timer stopped in ISR
                 REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED); // LOW
@@ -216,8 +221,6 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
                 ESP_LOGD("TIMER", "Measurement stopped");
                 REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED); // Set blue in case it was turned off as error indicator
             }
-
-            measure = !measure;
 
             break;
 
