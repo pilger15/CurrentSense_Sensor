@@ -81,7 +81,8 @@ typedef enum
 {
     espcommand_empty,
     espcommand_start,
-    espcommand_stop
+    espcommand_stop,
+    espcommand_wifiTx_power
 } esp_command_t;
 
 // static const uint64_t espcommand_channel = 0x74797380ec3cce13ULL;
@@ -202,7 +203,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
                 packet_cnt = 0;
                 buffer_read_idx = 0;
                 buffer_write_idx = 0;
-                ESP_LOGI("ESP-NOW", "Start measurement");
+                ESP_LOGD("ESP-NOW", "Start measurement");
                 ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, TIMERPERIOD_US)); // in us
                                                                                            // garbage transmit
                 ESP_LOGD("TIMER", "Measurement started");
@@ -214,7 +215,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
             if (measure)
             {
                 measure = false;
-                ESP_LOGI("ESP-NOW", "Stop measurement"); // stop
+                ESP_LOGD("ESP-NOW", "Stop measurement"); // stop
                 // timer stopped in ISR
                 REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED); // LOW
                                                                //  REG_WRITE(GPIO_OUT_W1TC_REG, BIT10); // LOW
@@ -223,7 +224,11 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
             }
 
             break;
-
+        case espcommand_wifiTx_power:
+        {
+            ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(data[1]));
+        }
+        break;
         default:
             break;
         }
@@ -233,7 +238,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
     {
         uint8_t espcommand_channel[8];
         memcpy(espcommand_channel, data, 8);
-        ESP_LOGI("ESP-NOW", "Registration of channel %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
+        ESP_LOGD("ESP-NOW", "Registration of channel %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
                  espcommand_channel[0],
                  espcommand_channel[1],
                  espcommand_channel[2],
@@ -247,7 +252,8 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
 
         memcpy(peer_dongle->peer_addr, esp_now_info->src_addr, ESP_NOW_ETH_ALEN);
         ESP_ERROR_CHECK(esp_now_add_peer(peer_dongle));
-        ESP_LOGI("ESP-NOW", "Dongle-MAC: %02x:%02x:%02x:%02x:%02x:%02x",
+        ESP_ERROR_CHECK(esp_now_set_peer_rate_config(peer_dongle->peer_addr, WIFI_PHY_RATE_54M));
+        ESP_LOGD("ESP-NOW", "Dongle-MAC: %02x:%02x:%02x:%02x:%02x:%02x",
                  peer_dongle->peer_addr[0],
                  peer_dongle->peer_addr[1],
                  peer_dongle->peer_addr[2],
@@ -255,6 +261,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
                  peer_dongle->peer_addr[4],
                  peer_dongle->peer_addr[5]);
         dongleRegistered = true;
+
         REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED); // Set blue
     }
     else
