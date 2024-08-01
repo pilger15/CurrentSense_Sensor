@@ -31,9 +31,9 @@
 esp_timer_handle_t periodic_timer;
 #define TIMERPERIOD_US 125
 
-#define BLUE_LED GPIO_NUM_3
+#define BLUE_LED GPIO_NUM_2
 // #define BIT_BLUE_LED BIT3
-#define ORANGE_LED GPIO_NUM_2
+#define ORANGE_LED GPIO_NUM_3
 // #define BIT_ORANGE_LED BIT2
 
 #define PIN_NUM_CS GPIO_NUM_5
@@ -224,12 +224,13 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
             }
 
             break;
-        case espcommand_wifiTx_power:
-        {
-            ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(data[1]));
-        }
-        break;
+
         default:
+            if (data[0] >= 8 && data[0] <= 80)
+            {
+                ESP_LOGI("ESP_TX", "Changed esp tx power to %d", data[0]);
+                esp_wifi_set_max_tx_power(data[0]);
+            }
             break;
         }
     }
@@ -252,7 +253,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
 
         memcpy(peer_dongle->peer_addr, esp_now_info->src_addr, ESP_NOW_ETH_ALEN);
         ESP_ERROR_CHECK(esp_now_add_peer(peer_dongle));
-        ESP_ERROR_CHECK(esp_now_set_peer_rate_config(peer_dongle->peer_addr, WIFI_PHY_RATE_54M));
+        // ESP_ERROR_CHECK(esp_now_set_peer_rate_config(peer_dongle->peer_addr, WIFI_PHY_RATE_54M));
         ESP_LOGD("ESP-NOW", "Dongle-MAC: %02x:%02x:%02x:%02x:%02x:%02x",
                  peer_dongle->peer_addr[0],
                  peer_dongle->peer_addr[1],
