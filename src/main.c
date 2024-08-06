@@ -6,26 +6,21 @@
 
 #include "esp_log.h"
 // #include "esp_sleep.h"
-#include "esp_wifi.h"
-#include "esp_now.h"
-#include "esp_private/wifi.h"
-#include "esp_private/esp_wifi_types_private.h"
-
-#include "driver/usb_serial_jtag.h"
-
-#include "nvs_flash.h"
-
-#include "sdkconfig.h"
-
 #include "driver/gpio.h"
+#include "driver/usb_serial_jtag.h"
+#include "esp_now.h"
+#include "esp_private/esp_wifi_types_private.h"
+#include "esp_private/wifi.h"
+#include "esp_wifi.h"
+#include "nvs_flash.h"
+#include "sdkconfig.h"
 #include "soc/gpio_reg.h"
 // #include "driver/timer.h"
-#include "esp_timer.h"
 #include "driver/spi_master.h"
-
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "freertos/ringbuf.h"
+#include "freertos/task.h"
 // #include "freertos/ringbuf.h"
 
 esp_timer_handle_t periodic_timer;
@@ -53,16 +48,16 @@ esp_timer_handle_t periodic_timer;
 esp_now_peer_info_t *peer_dongle;
 bool dongleRegistered = false;
 // Number of ADC data to be sent (16-bit)
-#define ADC_BUFFER_LEN (ESP_NOW_MAX_DATA_LEN / 2) // Length of the ADC buffer
+#define ADC_BUFFER_LEN (ESP_NOW_MAX_DATA_LEN / 2)  // Length of the ADC buffer
 uint16_t buffer_idx = 0;
 bool buffer_sel = false;
 bool buffer_sel_prev = false;
 
 spi_device_handle_t spi;
-uint8_t adc_data[2] = {0x00, 0x00}; // Data to be sent over SPI
+uint8_t adc_data[2] = {0x00, 0x00};  // Data to be sent over SPI
 spi_transaction_t adc_trans;
 
-#define RINGBUFFER_READ_LEN_16 (ESP_NOW_MAX_DATA_LEN / 2 - 1) // one uint16_t for packet counter
+#define RINGBUFFER_READ_LEN_16 (ESP_NOW_MAX_DATA_LEN / 2 - 1)  // one uint16_t for packet counter
 #define RINGBUFFER_SIZE (RINGBUFFER_READ_LEN_16 * 32)
 uint16_t adc_ringbuffer[RINGBUFFER_SIZE];
 uint16_t buffer_write_idx = 0;
@@ -71,33 +66,29 @@ uint16_t transfer_buffer[RINGBUFFER_READ_LEN_16 + 1];
 uint8_t receive_buffer[RINGBUFFER_READ_LEN_16 + 1];
 uint16_t packet_cnt = 0;
 
-typedef enum
-{
+typedef enum {
     TRANSFER_USB,
     TRANSFER_WIFI
 } transfertype_t;
 const transfertype_t transfertype = TRANSFER_WIFI;
-typedef enum
-{
+typedef enum {
     espcommand_empty,
     espcommand_start,
     espcommand_stop,
-    espcommand_wifiTx_power
+    // espcommand_wifiTx_power - commands 8-80 will be interpretted as WiFi power changes
 } esp_command_t;
 
 // static const uint64_t espcommand_channel = 0x74797380ec3cce13ULL;
-static const uint64_t espcommand_channel_bigendian = 0x13CE3CEC80737974ULL; // reverse due to little endian when casting
+static const uint64_t espcommand_channel_bigendian = 0x13CE3CEC80737974ULL;  // reverse due to little endian when casting
 
 bool measure = false;
 
-void spi_init(void)
-{
-
+void spi_init(void) {
     // gpio_set_direction(GPIO_NUM_10, GPIO_MODE_OUTPUT); // conversion
 
     // SPI
     spi_bus_config_t bus_cfg = {
-        .mosi_io_num = -1, // not used
+        .mosi_io_num = -1,  // not used
         .miso_io_num = PIN_NUM_MISO,
         .sclk_io_num = PIN_NUM_CLK,
         .quadwp_io_num = -1,
@@ -108,11 +99,11 @@ void spi_init(void)
 
     // SPI device configuration
     spi_device_interface_config_t dev_cfg = {
-        .command_bits = 0, ///< Default amount of bits in command phase (0-16), used when ``SPI_TRANS_VARIABLE_CMD`` is not used, otherwise ignored.
-        .address_bits = 0, ///< Default amount of bits in address phase (0-64), used when ``SPI_TRANS_VARIABLE_ADDR`` is not used, otherwise ignored.
-        .dummy_bits = 0,   ///< Amount of dummy bits to insert between address and data phase
+        .command_bits = 0,  ///< Default amount of bits in command phase (0-16), used when ``SPI_TRANS_VARIABLE_CMD`` is not used, otherwise ignored.
+        .address_bits = 0,  ///< Default amount of bits in address phase (0-64), used when ``SPI_TRANS_VARIABLE_ADDR`` is not used, otherwise ignored.
+        .dummy_bits = 0,    ///< Amount of dummy bits to insert between address and data phase
         .mode = 0,
-        .cs_ena_pretrans = 4, // CS is initialisation conversion and transmission
+        .cs_ena_pretrans = 4,  // CS is initialisation conversion and transmission
         .cs_ena_posttrans = 16,
         .spics_io_num = GPIO_NUM_10,
         .clock_speed_hz = SPI_FREQUENCY,
@@ -121,7 +112,7 @@ void spi_init(void)
     };
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev_cfg, &spi));
 
-    adc_trans.tx_buffer = NULL; // not used
+    adc_trans.tx_buffer = NULL;  // not used
 
     // adc_trans.length = 16;
     adc_trans.rxlength = 16;
@@ -136,15 +127,12 @@ void spi_init(void)
 
     ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
 }
-static void IRAM_ATTR periodic_timer_callback(void *arg)
-{
-    if (measure)
-    {
+static void IRAM_ATTR periodic_timer_callback(void *arg) {
+    if (measure) {
         // REG_WRITE(GPIO_OUT_W1TC_REG, BIT10); // Set conversion to 0 (initialize transfer)
 
-        esp_err_t ret = spi_device_polling_transmit(spi, &adc_trans); // Read last conversion
-        if (ret != ESP_OK)
-        {
+        esp_err_t ret = spi_device_polling_transmit(spi, &adc_trans);  // Read last conversion
+        if (ret != ESP_OK) {
             ESP_LOGE("SPI", "SPI transaction failed");
         }
         adc_ringbuffer[buffer_write_idx] = ((uint16_t)adc_trans.rx_data[0] << 8) | (adc_trans.rx_data[1]);
@@ -152,9 +140,8 @@ static void IRAM_ATTR periodic_timer_callback(void *arg)
 
         buffer_write_idx++;
         buffer_write_idx %= RINGBUFFER_SIZE;
-        if (buffer_write_idx == buffer_read_idx)
-        { // since incrementing in single steps this should catch an overflow
-          // ESP_LOGE("SPI", "RINGBUFFER BUFFER OVERFLOW, w=%d r=%d,buffersize=%d", buffer_write_idx, buffer_read_idx, RINGBUFFER_SIZE);
+        if (buffer_write_idx == buffer_read_idx) {  // since incrementing in single steps this should catch an overflow
+                                                    // ESP_LOGE("SPI", "RINGBUFFER BUFFER OVERFLOW, w=%d r=%d,buffersize=%d", buffer_write_idx, buffer_read_idx, RINGBUFFER_SIZE);
         }
         /*if (++buffer_idx >= ADC_BUFFER_LEN)
         {
@@ -167,75 +154,65 @@ static void IRAM_ATTR periodic_timer_callback(void *arg)
         buffer_store[buffer_idx] = ((uint16_t)adc_trans.rx_data[1]|(uint16_t)adc_trans.rx_data[0])+buffer_idx;        // Store data in the selected buffer #TODO: #DEBUG remove bufferIDX
         */
         //  REG_WRITE(GPIO_OUT_W1TS_REG, BIT10); // Set conversion to 1 (start conversion)
-    }
-    else
-    {
+    } else {
         // REG_WRITE(GPIO_OUT_W1TC_REG, BIT2); // clear
         ESP_ERROR_CHECK(esp_timer_stop(periodic_timer));
         buffer_read_idx = 0;
         buffer_write_idx = 0;
     }
 }
-static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
-{
-    if (status == ESP_NOW_SEND_SUCCESS)
-    {
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    if (status == ESP_NOW_SEND_SUCCESS) {
         // Data sent successfully
-    }
-    else
-    {
+    } else {
         ESP_LOGE("ESP-NOW", "Error sending data: %s", esp_err_to_name(status));
-        REG_WRITE(GPIO_OUT_W1TC_REG, 1 << BLUE_LED); // Clear BLUE LED;
+        REG_WRITE(GPIO_OUT_W1TC_REG, 1 << BLUE_LED);  // Clear BLUE LED;
     }
 }
-static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_t *data, int data_len)
-{
+static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_t *data, int data_len) {
     //
-    if (dongleRegistered && esp_now_is_peer_exist(esp_now_info->src_addr)) // check if command is from registed Dongle
+    if (dongleRegistered && esp_now_is_peer_exist(esp_now_info->src_addr))  // check if command is from registed Dongle
     {
         ESP_LOGD("ESP-NOW", "Received command %d- entering Switch", data[0]);
-        switch ((esp_command_t)data[0])
-        {
-        case espcommand_start:
-            if (!measure) // start measure
-            {
-                measure = true;
-                packet_cnt = 0;
-                buffer_read_idx = 0;
-                buffer_write_idx = 0;
-                ESP_LOGD("ESP-NOW", "Start measurement");
-                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, TIMERPERIOD_US)); // in us
-                                                                                           // garbage transmit
-                ESP_LOGD("TIMER", "Measurement started");
+        switch ((esp_command_t)data[0]) {
+            case espcommand_start:
+                if (!measure)  // start measure
+                {
+                    measure = true;
+                    packet_cnt = 0;
+                    buffer_read_idx = 0;
+                    buffer_write_idx = 0;
+                    ESP_LOGD("ESP-NOW", "Start measurement");
+                    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, TIMERPERIOD_US));  // in us
+                                                                                                // garbage transmit
+                    ESP_LOGD("TIMER", "Measurement started");
 
-                REG_WRITE(GPIO_OUT_W1TS_REG, 1 << ORANGE_LED); // High
-            }
-            break;
-        case espcommand_stop:
-            if (measure)
-            {
-                measure = false;
-                ESP_LOGD("ESP-NOW", "Stop measurement"); // stop
-                // timer stopped in ISR
-                REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED); // LOW
-                                                               //  REG_WRITE(GPIO_OUT_W1TC_REG, BIT10); // LOW
-                ESP_LOGD("TIMER", "Measurement stopped");
-                REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED); // Set blue in case it was turned off as error indicator
-            }
+                    REG_WRITE(GPIO_OUT_W1TS_REG, 1 << ORANGE_LED);  // High
+                }
+                break;
+            case espcommand_stop:
+                if (measure) {
+                    measure = false;
+                    ESP_LOGD("ESP-NOW", "Stop measurement");  // stop
+                    // timer stopped in ISR
+                    REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED);  // LOW
+                                                                    //  REG_WRITE(GPIO_OUT_W1TC_REG, BIT10); // LOW
+                    ESP_LOGD("TIMER", "Measurement stopped");
+                    REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED);  // Set blue in case it was turned off as error indicator
+                }
 
-            break;
+                break;
 
-        default:
-            if (data[0] >= 8 && data[0] <= 80)
-            {
-                ESP_LOGI("ESP_TX", "Changed esp tx power to %d", data[0]);
-                esp_wifi_set_max_tx_power(data[0]);
-            }
-            break;
+            default:
+                if (data[0] >= 8 && data[0] <= 80) {
+                    ESP_LOGI("ESP_TX", "Changed esp tx power to %d", data[0]);
+                    esp_wifi_set_max_tx_power(data[0]);
+                }
+                break;
         }
     }
     // register dongle
-    else if (!dongleRegistered && (data_len == sizeof(uint64_t)) && *(uint64_t *)data == espcommand_channel_bigendian) // cast command an receive reverse endian
+    else if (!dongleRegistered && (data_len == sizeof(uint64_t)) && *(uint64_t *)data == espcommand_channel_bigendian)  // cast command an receive reverse endian
     {
         uint8_t espcommand_channel[8];
         memcpy(espcommand_channel, data, 8);
@@ -263,16 +240,13 @@ static void espnow_recv_cb(const esp_now_recv_info_t *esp_now_info, const uint8_
                  peer_dongle->peer_addr[5]);
         dongleRegistered = true;
 
-        REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED); // Set blue
-    }
-    else
-    {
+        REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED);  // Set blue
+    } else {
         ESP_LOGD("ESP-NOW", "Received message but not addressed to this channel");
     }
 }
 
-void IRAM_ATTR usb_transfer_task(void *pvParameters)
-{
+void IRAM_ATTR usb_transfer_task(void *pvParameters) {
     usb_serial_jtag_driver_config_t usb_serial_config = {
         .tx_buffer_size = sizeof(transfer_buffer),
         .rx_buffer_size = sizeof(transfer_buffer)};
@@ -283,42 +257,35 @@ void IRAM_ATTR usb_transfer_task(void *pvParameters)
     // memset(buffer_espnow_rx, 0x55, sizeof(buffer_espnow_rx) * sizeof(uint8_t));
     ESP_LOGI("USB", "USB initialised");
 
-    while (true)
-    {
-
+    while (true) {
         // check ringbuffer wrap
 
-        if (usb_serial_jtag_read_bytes(receive_buffer, sizeof(receive_buffer), pdMS_TO_TICKS(1)))
-        {
-            if (!measure) // start measure
+        if (usb_serial_jtag_read_bytes(receive_buffer, sizeof(receive_buffer), pdMS_TO_TICKS(1))) {
+            if (!measure)  // start measure
             {
-                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, TIMERPERIOD_US)); // in us
-                                                                                           // garbage transmit
+                ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, TIMERPERIOD_US));  // in us
+                                                                                            // garbage transmit
                 ESP_LOGD("TIMER", "Measurement started");
 
-                REG_WRITE(GPIO_OUT_W1TS_REG, 1 << ORANGE_LED); // High
+                REG_WRITE(GPIO_OUT_W1TS_REG, 1 << ORANGE_LED);  // High
                 packet_cnt = 0;
-            }
-            else
-            {                                                  // stop
-                REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED); // LOW
-                                                               //  REG_WRITE(GPIO_OUT_W1TC_REG, BIT10); // LOW
+            } else {                                            // stop
+                REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED);  // LOW
+                                                                //  REG_WRITE(GPIO_OUT_W1TC_REG, BIT10); // LOW
                 ESP_LOGD("TIMER", "Measurement stopped");
-                REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED); // Set blue in case it was turned off as error indicator
+                REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED);  // Set blue in case it was turned off as error indicator
             }
 
             measure = !measure;
             buffer_read_idx = 0;
             buffer_write_idx = 0;
-        }
-        else if (((buffer_read_idx + RINGBUFFER_READ_LEN_16) < buffer_write_idx) // this assumes that read+read_len will not wrap around
-                 || (buffer_write_idx < buffer_read_idx))
-        { // this assumes the write has wrapped around so the read is bigger
+        } else if (((buffer_read_idx + RINGBUFFER_READ_LEN_16) < buffer_write_idx)  // this assumes that read+read_len will not wrap around
+                   || (buffer_write_idx < buffer_read_idx)) {                       // this assumes the write has wrapped around so the read is bigger
 
             // Send data over ESP-NOW
             // REG_WRITE(GPIO_OUT_W1TS_REG, 1 <<BLUE_LED); // initialise conversion
             memcpy(&transfer_buffer[1], &adc_ringbuffer[buffer_read_idx], RINGBUFFER_READ_LEN_16 * sizeof(uint16_t));
-            transfer_buffer[0] = (packet_cnt++); // will overflow to 0
+            transfer_buffer[0] = (packet_cnt++);  // will overflow to 0
             usb_serial_jtag_write_bytes((uint8_t *)transfer_buffer, sizeof(transfer_buffer), portMAX_DELAY);
             buffer_read_idx = (buffer_read_idx + RINGBUFFER_READ_LEN_16) % RINGBUFFER_SIZE;
             // ESP_LOGE("CNT", "CNT = %d", espnow_buffer_tx[0]);
@@ -328,8 +295,7 @@ void IRAM_ATTR usb_transfer_task(void *pvParameters)
     }
 }
 
-void IRAM_ATTR espnow_transfer_task(void *pvParameters)
-{
+void IRAM_ATTR espnow_transfer_task(void *pvParameters) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -357,41 +323,35 @@ void IRAM_ATTR espnow_transfer_task(void *pvParameters)
              mac_address[3], mac_address[4], mac_address[5]);
     // esp_log_level_set("ESP-NOW", ESP_LOG_DEBUG);
 
-    while (true)
-    {
-
+    while (true) {
         // check ringbuffer wrap
-        if (dongleRegistered && (((buffer_read_idx + RINGBUFFER_READ_LEN_16) < buffer_write_idx) // this assumes that read+read_len will not wrap around
-                                 || (buffer_write_idx < buffer_read_idx)))
-        { // this assumes the write has wrapped around so the read is bigger
+        if (dongleRegistered && (((buffer_read_idx + RINGBUFFER_READ_LEN_16) < buffer_write_idx)  // this assumes that read+read_len will not wrap around
+                                 || (buffer_write_idx < buffer_read_idx))) {                      // this assumes the write has wrapped around so the read is bigger
 
             // Send data over ESP-NOW
             // REG_WRITE(GPIO_OUT_W1TS_REG, 1 <<BLUE_LED); // initialise conversion
             memcpy(&transfer_buffer[1], &adc_ringbuffer[buffer_read_idx], RINGBUFFER_READ_LEN_16 * sizeof(uint16_t));
-            transfer_buffer[0] = (packet_cnt++); // will overflow to 0
+            transfer_buffer[0] = (packet_cnt++);  // will overflow to 0
             esp_err_t ret = esp_now_send(peer_dongle->peer_addr, (uint8_t *)transfer_buffer, sizeof(transfer_buffer));
             buffer_read_idx = (buffer_read_idx + RINGBUFFER_READ_LEN_16) % RINGBUFFER_SIZE;
             // ESP_LOGE("CNT", "CNT = %d", espnow_buffer_tx[0]);
             // REG_WRITE(GPIO_OUT_W1TC_REG, 1 <<BLUE_LED); // initialise conversion
-            if (ret != ESP_OK)
-            {
+            if (ret != ESP_OK) {
                 ESP_LOGE("ESP-NOW", "Error sending data: %s", esp_err_to_name(ret));
-                REG_WRITE(GPIO_OUT_W1TC_REG, 1 << BLUE_LED); // Clear BLUE LED;
+                REG_WRITE(GPIO_OUT_W1TC_REG, 1 << BLUE_LED);  // Clear BLUE LED;
             }
         }
         taskYIELD();
     }
 }
 
-void app_main(void)
-{
+void app_main(void) {
     vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     // Initialize NVS
     esp_err_t ret;
     ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
@@ -405,8 +365,8 @@ void app_main(void)
     gpio_set_direction(BLUE_LED, GPIO_MODE_OUTPUT);
     gpio_set_direction(ORANGE_LED, GPIO_MODE_OUTPUT);
 
-    REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED);   // initialise High
-    REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED); // initialise low
+    REG_WRITE(GPIO_OUT_W1TS_REG, 1 << BLUE_LED);    // initialise High
+    REG_WRITE(GPIO_OUT_W1TC_REG, 1 << ORANGE_LED);  // initialise low
 
     spi_init();
     // Initialise timer----------------------------------------------------------------------
@@ -431,15 +391,14 @@ void app_main(void)
 
     // Send data over ESP-NOW
     // Create the task for sending ESP-NOW data
-    switch (transfertype)
-    {
-    case TRANSFER_WIFI:
-        xTaskCreate(espnow_transfer_task, "espnow_send_task", 4096, NULL, tskIDLE_PRIORITY, NULL);
-        break;
+    switch (transfertype) {
+        case TRANSFER_WIFI:
+            xTaskCreate(espnow_transfer_task, "espnow_send_task", 4096, NULL, tskIDLE_PRIORITY, NULL);
+            break;
 
-    case TRANSFER_USB:
-        xTaskCreate(usb_transfer_task, "usb_transfer_task", 4096, NULL, tskIDLE_PRIORITY, NULL);
-        break;
+        case TRANSFER_USB:
+            xTaskCreate(usb_transfer_task, "usb_transfer_task", 4096, NULL, tskIDLE_PRIORITY, NULL);
+            break;
     }
 
     /*    while (false)
